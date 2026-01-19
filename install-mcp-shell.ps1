@@ -32,7 +32,7 @@ if (Test-Path $mcpShellFile) {
 }
 
 # 3. Create/update MCP config
-$configPath = "$destDir\mcp_config.json"
+$configPath = "$env:USERPROFILE\.gemini\mcp_config.json"
 $escapedPath = "$destDir\mcp-shell-cmd.js" -replace '\\', '\\\\'
 
 $config = @"
