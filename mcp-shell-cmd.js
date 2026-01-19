@@ -180,7 +180,7 @@ function handleRequest(req) {
             return {
                 jsonrpc: '2.0', id, result: {
                     protocolVersion: '2024-11-05',
-                    serverInfo: { name: 'shell-cmd-async', version: '2.0.0' },
+                    serverInfo: { name: 'shell-cmd-async', version: '2.1.0' },
                     capabilities: { tools: {} }
                 }
             };

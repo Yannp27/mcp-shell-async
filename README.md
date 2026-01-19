@@ -8,7 +8,7 @@ Async terminal execution with polling support. Prevents agent freezes.
 # 1. Copy the MCP shell script
 $dest = "$env:USERPROFILE\.gemini\antigravity"
 New-Item -Path $dest -ItemType Directory -Force
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/your-org/mcp-shell-cmd/main/mcp-shell-cmd.js" -OutFile "$dest\mcp-shell-cmd.js"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/SPEEDB04T/mcp-shell-async/master/mcp-shell-cmd.js" -OutFile "$dest\mcp-shell-cmd.js"
 
 # 2. Create MCP config (or merge with existing)
 $config = @'
