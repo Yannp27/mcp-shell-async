@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+do it#!/usr/bin/env node
 /**
  * MCP Shell - Async command execution with polling support
  * Supports cmd.exe (default on Windows) and Git Bash (shell='bash')
