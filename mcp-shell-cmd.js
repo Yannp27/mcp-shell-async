@@ -1,17 +1,37 @@
 #!/usr/bin/env node
 /**
- * MCP Shell - Async cmd.exe with polling support
+ * MCP Shell - Async command execution with polling support
+ * Supports cmd.exe (default on Windows) and Git Bash (shell='bash')
  * Agents can start commands, poll for output, and kill if needed
  */
 
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
 
 const BLACKLISTED = ['rm', 'rmdir', 'del', 'format', 'mkfs', 'dd', 'chmod', 'chown', 'sudo', 'su', 'shutdown', 'reboot'];
 
 // Active jobs store
 const jobs = new Map();
 let jobCounter = 0;
+
+// Find Git Bash on Windows
+let gitBashPath = null;
+if (process.platform === 'win32') {
+    const candidates = [
+        'C:\\Program Files\\Git\\bin\\bash.exe',
+        'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+        process.env.PROGRAMFILES + '\\Git\\bin\\bash.exe',
+        process.env['PROGRAMFILES(X86)'] + '\\Git\\bin\\bash.exe'
+    ];
+    for (const p of candidates) {
+        if (p && fs.existsSync(p)) {
+            gitBashPath = p;
+            break;
+        }
+    }
+}
 
 function validateCommand(cmd) {
     const base = cmd.trim().split(/\s+/)[0].toLowerCase();
@@ -22,13 +42,14 @@ function validateCommand(cmd) {
     return !BLACKLISTED.includes(base);
 }
 
-function createJob(command) {
+function createJob(command, shell = 'cmd') {
     const id = `job_${++jobCounter}_${Date.now()}`;
     const isWindows = process.platform === 'win32';
 
     const job = {
         id,
         command,
+        shell,
         status: 'running',
         stdout: '',
         stderr: '',
@@ -39,12 +60,21 @@ function createJob(command) {
         proc: null
     };
 
-    // Spawn the process
+    // Spawn the process based on shell preference
     if (isWindows) {
-        job.proc = spawn('cmd', ['/c', command], {
-            windowsHide: true,
-            env: process.env
-        });
+        if (shell === 'bash' && gitBashPath) {
+            // Use Git Bash - better for curl, JSON, etc.
+            job.proc = spawn(gitBashPath, ['-c', command], {
+                windowsHide: true,
+                env: process.env
+            });
+        } else {
+            // Default: cmd.exe
+            job.proc = spawn('cmd', ['/c', command], {
+                windowsHide: true,
+                env: process.env
+            });
+        }
     } else {
         job.proc = spawn('/bin/bash', ['-c', command], {
             env: process.env
@@ -162,11 +192,12 @@ function handleRequest(req) {
                     tools: [
                         {
                             name: 'start_command',
-                            description: 'Start a command asynchronously. Returns job ID for polling.',
+                            description: 'Start a command asynchronously. Returns job ID for polling. Use shell="bash" for curl/JSON commands.',
                             inputSchema: {
                                 type: 'object',
                                 properties: {
-                                    command: { type: 'string', description: 'Command to execute via cmd.exe' }
+                                    command: { type: 'string', description: 'Command to execute' },
+                                    shell: { type: 'string', description: 'Shell to use: "cmd" (default) or "bash" (Git Bash - better for curl/JSON)', enum: ['cmd', 'bash'] }
                                 },
                                 required: ['command']
                             }
@@ -201,11 +232,12 @@ function handleRequest(req) {
                         },
                         {
                             name: 'run_command',
-                            description: 'Run a command synchronously (for quick commands). Timeout: 60s.',
+                            description: 'Run a command synchronously (for quick commands). Timeout: 60s. Use shell="bash" for curl/JSON.',
                             inputSchema: {
                                 type: 'object',
                                 properties: {
-                                    command: { type: 'string', description: 'Command to execute' }
+                                    command: { type: 'string', description: 'Command to execute' },
+                                    shell: { type: 'string', description: 'Shell to use: "cmd" (default) or "bash" (Git Bash)', enum: ['cmd', 'bash'] }
                                 },
                                 required: ['command']
                             }
@@ -223,8 +255,9 @@ function handleRequest(req) {
                 if (!validateCommand(args.command)) {
                     return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'Error: Command blacklisted' }] } };
                 }
-                const jobId = createJob(args.command);
-                return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ job_id: jobId, status: 'started' }) }] } };
+                const shell = args.shell || 'cmd';
+                const jobId = createJob(args.command, shell);
+                return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ job_id: jobId, status: 'started', shell }) }] } };
             }
 
             if (toolName === 'poll_command') {
@@ -250,10 +283,30 @@ function handleRequest(req) {
                 try {
                     const { execSync } = require('child_process');
                     const isWindows = process.platform === 'win32';
-                    const escaped = args.command.replace(/"/g, '\\"');
-                    const result = isWindows
-                        ? execSync(`cmd /c "${escaped}"`, { encoding: 'utf8', timeout: 60000, windowsHide: true })
-                        : execSync(args.command, { encoding: 'utf8', shell: '/bin/bash', timeout: 60000 });
+                    const shell = args.shell || 'cmd';
+                    let result;
+
+                    if (isWindows) {
+                        if (shell === 'bash' && gitBashPath) {
+                            // Use Git Bash
+                            result = execSync(args.command, {
+                                encoding: 'utf8',
+                                timeout: 60000,
+                                windowsHide: true,
+                                shell: gitBashPath
+                            });
+                        } else {
+                            // Use cmd.exe
+                            const escaped = args.command.replace(/"/g, '\\"');
+                            result = execSync(`cmd /c "${escaped}"`, {
+                                encoding: 'utf8',
+                                timeout: 60000,
+                                windowsHide: true
+                            });
+                        }
+                    } else {
+                        result = execSync(args.command, { encoding: 'utf8', shell: '/bin/bash', timeout: 60000 });
+                    }
                     return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result || '(no output)' }] } };
                 } catch (err) {
                     return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `Error: ${err.stderr || err.message}` }] } };
@@ -294,5 +347,6 @@ setInterval(() => {
     }
 }, 60000);
 
-console.error('MCP shell (async cmd.exe) running on stdio');
+console.error('MCP shell v2.1 running on stdio');
+console.error(`Shells: cmd.exe (default)${gitBashPath ? ', Git Bash (shell="bash")' : ''}`);
 console.error('Tools: start_command, poll_command, kill_command, list_jobs, run_command');
